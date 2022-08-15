@@ -5,6 +5,7 @@ import org.keycloak.component.ComponentModel;
 import org.keycloak.credential.CredentialInput;
 import org.keycloak.credential.CredentialInputUpdater;
 import org.keycloak.credential.CredentialInputValidator;
+import org.keycloak.models.cache.CachedUserModel;
 import org.keycloak.models.GroupModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
@@ -71,7 +72,18 @@ public class DBUserStorageProvider implements UserStorageProvider,
         }
 
         UserCredentialModel cred = (UserCredentialModel) input;
-        return repository.validateCredentials(user.getUsername(), cred.getChallengeResponse());
+
+        UserModel dbUser = user;
+        // If the cache just got loaded in the last 500 millisec (i.e. probably part of the actual flow), there is no point in reloading the user.)
+        if (allowDatabaseToOverwriteKeycloak && user instanceof CachedUserModel && (System.currentTimeMillis() - ((CachedUserModel) user).getCacheTimestamp()) > 500) {
+          dbUser = this.getUserById(user.getId(), realm);
+
+          // For now, we'll just invalidate the cache if username or email has changed. Eventually we could check all (or a parametered list of) attributes fetched from the DB.
+          if (!java.util.Objects.equals(user.getUsername(), dbUser.getUsername()) || !java.util.Objects.equals(user.getEmail(), dbUser.getEmail())) {
+            ((CachedUserModel) user).invalidate();
+          }
+        }
+        return repository.validateCredentials(dbUser.getUsername(), cred.getChallengeResponse());
     }
 
     @Override
