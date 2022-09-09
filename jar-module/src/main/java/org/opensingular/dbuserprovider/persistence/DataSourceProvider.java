@@ -17,9 +17,9 @@ import java.util.concurrent.Executors;
 @JBossLog
 public class DataSourceProvider implements Closeable {
 
+    private static final SimpleDateFormat SIMPLE_DATE_FORMAT = new SimpleDateFormat("dd-MM-YYYY HH:mm:ss");
     private              ExecutorService  executor           = Executors.newFixedThreadPool(1);
     private              HikariDataSource hikariDataSource;
-    private static final SimpleDateFormat SIMPLE_DATE_FORMAT = new SimpleDateFormat("dd-MM-YYYY HH:mm:ss");
 
     public DataSourceProvider() {
     }
@@ -30,11 +30,11 @@ public class DataSourceProvider implements Closeable {
     }
 
 
-    public void configure(String url, RDBMS rdbms, String user, String pass) {
+    public void configure(String url, RDBMS rdbms, String user, String pass, String name) {
         HikariConfig hikariConfig = new HikariConfig();
         hikariConfig.setUsername(user);
         hikariConfig.setPassword(pass);
-        hikariConfig.setPoolName(StringUtils.capitalize("SINGULAR-USER-PROVIDER-" + SIMPLE_DATE_FORMAT.format(new Date())));
+        hikariConfig.setPoolName(StringUtils.capitalize("SINGULAR-USER-PROVIDER-" + name + SIMPLE_DATE_FORMAT.format(new Date())));
         hikariConfig.setJdbcUrl(url);
         hikariConfig.setConnectionTestQuery(rdbms.getTestString());
         hikariConfig.setDriverClassName(rdbms.getDriver());

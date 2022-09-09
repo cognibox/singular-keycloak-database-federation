@@ -14,8 +14,9 @@ import org.opensingular.dbuserprovider.model.QueryConfigurations;
 import org.opensingular.dbuserprovider.persistence.DataSourceProvider;
 import org.opensingular.dbuserprovider.persistence.RDBMS;
 
+import java.util.HashMap;
 import java.util.List;
-
+import java.util.Map;
 @JBossLog
 @AutoService(UserStorageProviderFactory.class)
 public class DBUserStorageProviderFactory implements UserStorageProviderFactory<DBUserStorageProvider> {
@@ -29,9 +30,7 @@ public class DBUserStorageProviderFactory implements UserStorageProviderFactory<
     private static final String PARAMETER_HELP             = " The %s is passed as query parameter.";
 
 
-    private DataSourceProvider  dataSourceProvider = new DataSourceProvider();
-    private QueryConfigurations queryConfigurations;
-    private boolean             configured         = false;
+    private Map<String, ProviderConfig> providerConfigPerInstance = new HashMap<>();
 
     @Override
     public void init(Config.Scope config) {
@@ -39,42 +38,47 @@ public class DBUserStorageProviderFactory implements UserStorageProviderFactory<
 
     @Override
     public void close() {
-      dataSourceProvider.close();
+        for (Map.Entry<String, ProviderConfig> pc : providerConfigPerInstance.entrySet()) {
+            pc.getValue().dataSourceProvider.close();
+        }
     }
 
     @Override
     public DBUserStorageProvider create(KeycloakSession session, ComponentModel model) {
-        if (!configured) {
-            configure(model);
-        }
-        return new DBUserStorageProvider(session, model, dataSourceProvider, queryConfigurations);
+        ProviderConfig providerConfig = providerConfigPerInstance.computeIfAbsent(model.getId(), s -> configure(model));
+        return new DBUserStorageProvider(session, model, providerConfig.dataSourceProvider, providerConfig.queryConfigurations);
     }
 
-    private synchronized void configure(ComponentModel config) {
-        String user     = config.get("user");
-        String password = config.get("password");
-        String url      = config.get("url");
-        RDBMS  rdbms    = RDBMS.getByDescription(config.get("rdbms"));
-        dataSourceProvider.configure(url, rdbms, user, password);
-        queryConfigurations = new QueryConfigurations(
-                config.get("count"),
-                config.get("listAll"),
-                config.get("findById"),
-                config.get("findByUsername"),
-                config.get("findBySearchTerm"),
-                config.get("findPasswordHash"),
-                config.get("hashFunction"),
+    private synchronized ProviderConfig  configure(ComponentModel model) {
+        log.infov("Creating configuration for model: id={0} name={1}", model.getId(), model.getName());
+        ProviderConfig providerConfig = new ProviderConfig();
+        String user     = model.get("user");
+        String password = model.get("password");
+        String url      = model.get("url");
+        RDBMS  rdbms    = RDBMS.getByDescription(model.get("rdbms"));
+        providerConfig.dataSourceProvider.configure(url, rdbms, user, password, model.getName());
+        providerConfig.queryConfigurations = new QueryConfigurations(
+                model.get("count"),
+                model.get("listAll"),
+                model.get("findById"),
+                model.get("findByUsername"),
+                model.get("findBySearchTerm"),
+                model.get("findPasswordHash"),
+                model.get("hashFunction"),
                 rdbms,
-                config.get("allowKeycloakDelete", false),
-                config.get("allowDatabaseToOverwriteKeycloak", false)
+                model.get("allowKeycloakDelete", false),
+                model.get("allowDatabaseToOverwriteKeycloak", false)
         );
-        configured = true;
+        return providerConfig;
     }
 
     @Override
-    public void validateConfiguration(KeycloakSession session, RealmModel realm, ComponentModel config) throws ComponentValidationException {
+    public void validateConfiguration(KeycloakSession session, RealmModel realm, ComponentModel model) throws ComponentValidationException {
         try {
-            configure(config);
+            ProviderConfig old = providerConfigPerInstance.put(model.getId(), configure(model));
+            if (old != null) {
+                old.dataSourceProvider.close();
+            }
         } catch (Exception e) {
             throw new ComponentValidationException(e.getMessage(), e);
         }
@@ -217,6 +221,8 @@ public class DBUserStorageProviderFactory implements UserStorageProviderFactory<
                 .add()
                 .build();
     }
-
-
+    private static class ProviderConfig {
+        private DataSourceProvider  dataSourceProvider = new DataSourceProvider();
+        private QueryConfigurations queryConfigurations;
+    }
 }
