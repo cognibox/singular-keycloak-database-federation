@@ -17,16 +17,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Function;
+
 
 
 @JBossLog
@@ -50,14 +43,16 @@ public class UserRepository {
                 if (pageable != null) {
                     query = PagingUtil.formatScriptWithPageable(query, pageable, queryConfigurations.getRDBMS());
                 }
-                PreparedStatement statement = c.prepareStatement(query);
-                if (params != null) {
-                    for (int i = 1; i <= params.length; i++) {
-                        statement.setObject(i, params[i - 1]);
+                log.infov("Query: {0} params: {1} ", query, Arrays.toString(params));
+                try (PreparedStatement statement = c.prepareStatement(query)) {
+                    if (params != null) {
+                        for (int i = 1; i <= params.length; i++) {
+                            statement.setObject(i, params[i - 1]);
+                        }
                     }
-                }
-                try (ResultSet rs = statement.executeQuery()) {
-                    return resultTransformer.apply(rs);
+                    try (ResultSet rs = statement.executeQuery()) {
+                        return resultTransformer.apply(rs);
+                    }
                 }
             } catch (SQLException e) {
                 log.error(e.getMessage(), e);
@@ -88,7 +83,6 @@ public class UserRepository {
         }
     }
 
-
     private Integer readInt(ResultSet rs) {
         try {
             return rs.next() ? rs.getInt(1) : null;
@@ -117,10 +111,14 @@ public class UserRepository {
         return doQuery(queryConfigurations.getListAll(), null, this::readMap);
     }
 
-    public int getUsersCount() {
-        return Optional.ofNullable(doQuery(queryConfigurations.getCount(), null, this::readInt)).orElse(0);
+    public int getUsersCount(String search) {
+        if (search == null || search.isEmpty()) {
+            return Optional.ofNullable(doQuery(queryConfigurations.getCount(), null, this::readInt)).orElse(0);
+        } else {
+            String query = String.format("select count(*) from (%s) count", queryConfigurations.getFindBySearchTerm());
+            return Optional.ofNullable(doQuery(query, null, this::readInt, search)).orElse(0);
+        }
     }
-
 
     public Map<String, String> findUserById(String id) {
         return Optional.ofNullable(doQuery(queryConfigurations.getFindById(), null, this::readMap, id))
@@ -134,12 +132,11 @@ public class UserRepository {
                 .stream().findFirst();
     }
 
-    public List<Map<String, String>> findUsers(String query) {
-        if (query == null || query.length() < 2) {
-            log.info("Ignoring query with less than two characters as search term");
-            return Collections.emptyList();
+    public List<Map<String, String>> findUsers(String search, PagingUtil.Pageable pageable) {
+        if (search == null || search.isEmpty()) {
+            return doQuery(queryConfigurations.getListAll(), pageable, this::readMap);
         }
-        return doQuery(queryConfigurations.getFindBySearchTerm(), null, this::readMap, query);
+        return doQuery(queryConfigurations.getFindBySearchTerm(), pageable, this::readMap, search);
     }
 
     public boolean validateCredentials(String username, String password) {
@@ -155,11 +152,6 @@ public class UserRepository {
 
     public boolean updateCredentials(String username, String password) {
         throw new NotImplementedException("Password update not supported");
-    }
-
-
-    public List<Map<String, String>> findUsersPaged(Map<String, String> params, int firstResult, int maxResults) {
-        return doQuery(queryConfigurations.getListAll(), new Pageable(firstResult, maxResults), this::readMap);
     }
 
     public boolean removeUser() {
